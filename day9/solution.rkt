@@ -1,66 +1,83 @@
 #lang racket
 
-(define (sight-line lst)
-  (define (rec max result lst)
-    (if (empty? lst)
-        (reverse result)
-        (if (char>? (car lst) max)
-            (rec (car lst) (cons #t result) (cdr lst))
-            (rec max (cons #f result) (cdr lst)))))
-  (rec (car lst) '(#t) (cdr lst)))
+(require racket/set)
 
-(define (T x)
-  (reverse (apply map list x)))
+(define lines
+  (map (λ (i) (list (car i) (string->number (cadr i)))) (map string-split (file->lines "input.txt"))))
 
-(define (T-n x n)
-  (if (= 0 n) x (T-n (T x) (sub1 n))))
+(struct state (snake history) #:transparent)
 
-(define height-map (map string->list (file->lines "input.txt")))
+(define (distance lhs rhs)
+  (let ([x1 (car lhs)] [y1 (cadr lhs)]
+        [x2 (car rhs)] [y2 (cadr rhs)])
+    (integer-sqrt (+ (expt (- x2 x1) 2) (expt (- y2 y1) 2)))))
 
-(define angles (build-list 4 (λ (n) (T-n height-map n))))
+(define (move-head from direction)
+  (let ([x (car from)] [y (cadr from)])
+    (cond
+      [(string=? direction "R") (list (add1 x) y)]
+      [(string=? direction "L") (list (sub1 x) y)]
+      [(string=? direction "U") (list x (add1 y))]
+      [(string=? direction "D") (list x (sub1 y))])))
 
-(define (calc f)
-  (for/list ([angle angles] [n (in-list '(0 3 2 1))])
-    (T-n (map f angle) n)))
+(define (move-one st direction)
+  (let* ([new-head (move-head (car (state-snake st)) direction)]
+         [sections (cdr (state-snake st))]
+         [new-snake (move-sections new-head sections direction '())])
+    (state (reverse new-snake) (set-add (state-history st) (car new-snake)))))
 
-(define (f-matrix f lhs rhs)
-  (for/list ([lhs-line lhs] [rhs-line rhs])
-    (map f lhs-line rhs-line)))
+(define (move-n st direction n)
+  (if (= n 0)
+      st
+      (move-n (move-one st direction) direction (sub1 n))))
 
-(define (or-matrix lhs rhs)
-  (define (f-or x y)
-    (or x y))
-  (f-matrix f-or lhs rhs))
+(define (move-sections H snake direction result)
+  (if (empty? snake)
+      (cons H result)
+      (move-sections (move-section (car snake) H direction)
+                     (cdr snake) direction
+                     (cons H result))))
 
-(define N (length height-map))
-(define M (length (car height-map)))
+(define (move-section from to direction)
+  (if (or (<= (distance from to) 1) (empty? to))
+      from
+      (cond
+        [(= (car from) (car to))
+         (if (> (cadr to) (cadr from))
+             ; north
+             (list (car from) (add1 (cadr from)))
+             ; south
+             (list (car from) (sub1 (cadr from))))]
+        [(= (cadr from) (cadr to))
+         (if (> (car to) (car from))
+             ; east
+             (list (add1 (car from)) (cadr from))
+             ; west
+             (list (sub1 (car from)) (cadr from)))]
+        [(and (> (car to) (car from)) (> (cadr to) (cadr from)))
+             ; north-east
+             (list (add1 (car from)) (add1 (cadr from)))]
+        [(and (> (car to) (car from)) (< (cadr to) (cadr from)))
+             ; south-east
+             (list (add1 (car from)) (sub1 (cadr from)))]
+        [(and (< (car to) (car from)) (< (cadr to) (cadr from)))
+             ; south-west
+             (list (sub1 (car from)) (sub1 (cadr from)))]
+        [(and (< (car to) (car from)) (> (cadr to) (cadr from)))
+             ; north-west
+             (list (sub1 (car from)) (add1 (cadr from)))])))
+
+(define (list-eater st lst)
+  (if (empty? lst)
+      st
+      (list-eater (move-n st (caar lst) (cadar lst)) (cdr lst))))
 
 (define (solve)
-  (count identity
-         (flatten
-          (foldl or-matrix (build-list N (const (build-list M (const #f)))) (calc sight-line)))))
+  (set-count (state-history (list-eater (state (list '(0 0) '(0 0)) (set)) lines))))
 
 (printf "Part 1: ~a\n" (solve))
 
-(define (score lst)
-  (define (rec max result lst)
-    (if (empty? lst)
-        result
-        (if (char>=? (car lst) max) (add1 result) (rec max (add1 result) (cdr lst)))))
-  (rec (car lst) 0 (cdr lst)))
-
-(define (list-eater result lst)
-  (if (empty? lst) result (list-eater (cons (score lst) result) (cdr lst))))
-
-(define (score-line lst)
-  (reverse (list-eater '() lst)))
-
-(define (*-matrix lhs rhs)
-  (f-matrix * lhs rhs))
-
 (define (solve2)
-  (car (sort (flatten
-              (foldl *-matrix (build-list N (const (build-list M (const 1)))) (calc score-line)))
-             >)))
+  (set-count (state-history (list-eater (state (build-list 10 (const '(0 0))) (set)) lines))))
 
 (printf "Part 2: ~a\n" (solve2))
